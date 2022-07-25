@@ -58,14 +58,13 @@
 	      "(p ~A ?~A> state free buffer full ?~A> preparation free processor free execution free =~A> ~A ~A ==> +manual> cmd punch finger index hand ~A)"
 	      )
 
-(defparameter *template-create-non-manual*
+(defparameter *template-create-retrieval*
 	      "(p ~A ?manual> preparation free processor free execution free ?~A> state free buffer full ?~A> state free =~A> ~A =X ==> +~A> ~A =X)"
 	      )
 
-(defun create-production-from-template (buffer-from slot-from buffer-to slot-to create)
-  (let ((name (format nil "~A~A-~A~A~A" buffer-from slot-from buffer-to slot-to create)))
-    (cond ((and create
-		 (equal buffer-to 'manual))
+(defun create-production-from-template (buffer-from slot-from buffer-to slot-to)
+  (let ((name (format nil "~A~A-~A~A" buffer-from slot-from buffer-to slot-to)))
+    (cond ((equal buffer-to 'manual)
 	   (read-from-string (format nil
 				      *template-create-manual*
 				      name 
@@ -76,18 +75,17 @@
 				      'left
 				      'left))
 	   (read-from-string (format nil
-				       *template-create-manual*
-				       name 
-				       buffer-from
-				       buffer-to
-				       buffer-from
-				       slot-from
-				       'right
-				       'right)))
-	  ((and create
-		(not (equal buffer-to 'manual)))
+				      *template-create-manual*
+				      name 
+				      buffer-from
+				      buffer-to
+				      buffer-from
+				      slot-from
+				      'right
+				      'right)))
+	  ((equal buffer-to 'retrieval)
 	   (read-from-string (format nil
-				     *template-create-non-manual*
+				     *template-create-retrieval*
 				     name 
 				     buffer-from
 				     buffer-to
@@ -95,7 +93,7 @@
 				     slot-from
 				     buffer-to
 				     slot-to)))
-	  ((not create)
+	  (t
 	   (read-from-string (format nil
 			      *template-modify*
 			      name 
@@ -113,43 +111,48 @@
     (dolist (slot-from *slots*)
       (dolist (buffer-to *buffers*)
 	(dolist (slot-to *slots*)
-	  (dolist (create '(t nil))
-	    (when (and (not (equalp buffer-to 'visual))
-		       (not (equalp buffer-from 'manual))
-		       (not (equalp buffer-to buffer-from))
-		       (not (and (not create)
-				 (equalp buffer-to 'manual)))
-		       (not (and (not create)
-				 (equalp buffer-to 'retrieval))))
-	      (eval (create-production-from-template buffer-from slot-from buffer-to slot-to create)))))))))
+	  (when (and (not (equalp buffer-to 'visual))
+		     (not (equalp buffer-from 'manual))
+		     (not (equalp buffer-to buffer-from)))
+	    (eval (create-production-from-template buffer-from slot-from buffer-to slot-to))))))))
 
 ;;; -------------------------------------------------------------- ;;;
 ;;; TEST MODEL: SIMON TASK
 ;;; -------------------------------------------------------------- ;;;
 
-(define-model test
+(define-model simon-train
 
   (sgp :er t
        :esc t
        :ul t
-       :esc 0.2)
+       :esc 0.2
+       :do-not-harvest imaginal)
   
-  (chunk-type memory slot1 slot2 slot3)
-  (add-dm (rule) (circle) (square) (simon)
-	  (rule1 isa memory slot1 rule slot2 circle slot3 left)
-	  (rule2 isa memory slot2 rule slot2 square slot3 right)
-	  (congruent1 isa memory slot1 circle slot2 left slot3 black)
-	  (congruent2 isa memory slot1 square slot2 right slot3 black)
-	  (incongruent1 isa memory slot1 circle slot2 right slot3 black)
-	  (incongruent2 isa memory slot1 square slot2 left slot3 black)
-	  (simon-goal isa memory slot1 simon slot2 rule))
+  (chunk-type memory kind memory slot1 slot2 slot3)
+  (add-dm (memory) (rule) (circle) (square) (simon)
+	  (rule1 isa memory kind memory slot1 rule slot2 circle slot3 left)
+	  (rule2 isa memory kind memory slot2 rule slot2 square slot3 right)
+	  (congruent1 isa memory kind memory slot1 circle slot2 left slot3 black)
+	  (congruent2 isa memory kind memory slot1 square slot2 right slot3 black)
+	  (incongruent1 isa memory kind memory slot1 circle slot2 right slot3 black)
+	  (incongruent2 isa memory kind memory slot1 square slot2 left slot3 black)
+	  ;; Fillers
+	  (simon-goal isa memory kind memory slot1 simon slot2 rule)
+	  (imaginal-sketchpad isa memory kind memory))
+  
   )
 
+
 (create-productions-from-template)
+(install-device '("motor" "keyboard"))
 
 (defparameter *trial-start* 0)
 
 (defparameter *trial-response* nil)
+
+(defparameter *correct-response* nil)
+
+(defparameter *trial-ended* nil)
 
 (defparameter *responses* '((square . right)
 			    (circle . left)))
@@ -162,28 +165,68 @@
 
 (defun process-response (model key)
   (declare (ignore model))
+  (model-output "---> PROCESS RESPOOOOOONSE --->")
   (if (string-equal key "j")
       (setf *trial-response* 'right)
-      (setf *trial-response* 'left)))
+      (setf *trial-response* 'left))
+  (schedule-event-relative 0.001 'reward-response))
+
+(defun reward-response ()
+  (if (equal *trial-response*
+	     *correct-response*)
+      (trigger-reward 10)
+      (trigger-reward -5))
+  (setf *trial-ended* t))
+      
 
 (defun trial-end-p (num)
+  "A trial ends either when a response is made or MAX-DURATION is exceeded" 
   (declare (ignore num))
   (or (> (- (mp-time) *trial-start*)
 	 *max-trial-duration*)
-      *trial-response*))
+      *trial-ended*))
+
+(defun reset-buffers ()
+  "Resets the slots of Goal and Imaginal to initial conditions"
+  (mod-buffer-chunk 'imaginal '(slot1 nil slot2 nil slot3 nil))
+  (mod-buffer-chunk 'goal '(slot1 simon slot2 rule slot3 nil)))
+  
 
 (add-act-r-command "process-response" 'process-response)
 (add-act-r-command "trial-end?" 'trial-end-p)
 (monitor-act-r-command "output-key" "process-response")
 
 (defun run-trial ()
+  "Runs a single trial with a randomly-geneated stimulus"4
+  ;;; Generates a stimulus to place in thge visual buffer
   (let* ((stimulus (pick (list 'congruent1 'congruent2 'incongruent1 'incongruent2)))
 	 (response (get-correct-response stimulus)))
+
+    
+    ;; Set up trial variables
     (setf *trial-start* (mp-time))
     (setf *trial-response* nil)
+    (setf *correct-response* response)
+    (setf *trial-ended* nil)
+
+    (model-output "---> START TRIAL")  ;; Trace Marker
+
+    ;; Schedule a negatiev reward if no motor response is made by MAX-DURATION.
+    ;; This needs to be done right before the trial ends, otherwise no reward
+    ;; will be propagated.
+    (schedule-event-relative (- *max-trial-duration*
+				0.01)
+			     'trigger-reward
+			     :module 'utility
+			     :params '(-1000))
+    ;;; Set up the buffers
+    
     (goal-focus simon-goal)
     (set-buffer-chunk 'visual stimulus)
+    (set-buffer-chunk 'imaginal 'imaginal-sketchpad)
+
+    ;;; Run the trial
     (run-until-condition 'trial-end-p)
-    (if (equal *trial-response* response)
-	(trigger-reward 10)
-	(trigger-reward -10))))
+
+    ;;; REset
+    (reset-buffers)))
