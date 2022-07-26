@@ -11,7 +11,7 @@
 	   (loop while (< partial end) do
 	     (push partial results)
 	     (incf partial step)))
-	  ((and (> start end)
+	  ((and (> start end)1
 		(minusp step))
 	   (loop while (> partial end) do
 	     (push partial results)
@@ -49,27 +49,94 @@
 ;;; -------------------------------------------------------------- ;;;
 
 (defparameter *buffers* '(visual imaginal goal retrieval manual))
+
 (defparameter *slots* '(slot1 slot2 slot3))
+
 (defparameter *template-modify*
-	      "(p ~A ?manual> preparation free processor free execution free ?~A> state free buffer full ?~A> state free buffer full =~A> =~A> ~A =X ==> =~A> ~A =X)"
+	      "
+(p ~A 
+ ?manual> 
+  preparation free 
+  processor free 
+  execution free 
+ ?retrieval> 
+  state free 
+ ?imaginal> 
+  state free 
+  buffer full
+ ?goal> 
+  state free 
+  buffer full
+ ?visual>
+  state free 
+ =~A>
+ =~A> 
+  ~A =X 
+==> 
+ =~A> 
+  ~A =X)"
 	      )
 
 (defparameter *template-create-manual*
-	      "(p ~A ?~A> state free buffer full ?~A> preparation free processor free execution free =~A> ~A ~A ==> +manual> cmd punch finger index hand ~A)"
+	      "
+(p ~A 
+ ?manual> 
+  preparation free 
+  processor free 
+  execution free 
+ ?retrieval> 
+  state free 
+ ?imaginal> 
+  state free 
+  buffer full
+ ?goal> 
+  state free 
+  buffer full
+ ?visual>
+  state free
+ =~A> 
+  ~A ~A 
+==> 
+ +manual> 
+  cmd punch 
+  finger index 
+  hand ~A)"
 	      )
 
 (defparameter *template-create-retrieval*
-	      "(p ~A ?manual> preparation free processor free execution free ?~A> state free buffer full ?~A> state free =~A> ~A =X ==> +~A> ~A =X)"
+  "
+(p ~A 
+ ?manual> 
+  preparation free 
+  processor free 
+  execution free 
+ ?retrieval> 
+  state free 
+ ?imaginal> 
+  state free 
+  buffer full
+ ?goal> 
+  state free 
+  buffer full
+ ?visual>
+  state free 
+ =~A> 
+  ~A =X 
+==> 
+ +~A> 
+  kind memory
+  ~A =X)"
 	      )
 
+(defun create-production-name  (buffer-from slot-from buffer-to slot-to)
+   (format nil "from-~A-~A-to-~A-~A" buffer-from slot-from buffer-to slot-to))
+
 (defun create-production-from-template (buffer-from slot-from buffer-to slot-to)
-  (let ((name (format nil "~A~A-~A~A" buffer-from slot-from buffer-to slot-to)))
+  (let ((name (create-production-name buffer-from slot-from buffer-to slot-to)))
     (cond ((equal buffer-to 'manual)
 	   (read-from-string (format nil
 				      *template-create-manual*
 				      name 
-				      buffer-from
-				      buffer-to
 				      buffer-from
 				      slot-from
 				      'left
@@ -77,8 +144,6 @@
 	   (read-from-string (format nil
 				      *template-create-manual*
 				      name 
-				      buffer-from
-				      buffer-to
 				      buffer-from
 				      slot-from
 				      'right
@@ -88,17 +153,13 @@
 				     *template-create-retrieval*
 				     name 
 				     buffer-from
-				     buffer-to
-				     buffer-from
 				     slot-from
 				     buffer-to
 				     slot-to)))
 	  (t
 	   (read-from-string (format nil
 			      *template-modify*
-			      name 
-			      buffer-from
-			      buffer-to
+			      name
 			      buffer-to
 			      buffer-from
 			      slot-from
@@ -107,6 +168,7 @@
 
     
 (defun create-productions-from-template ()
+  "Populates a model with all the possible productions"
   (dolist (buffer-from *buffers*)
     (dolist (slot-from *slots*)
       (dolist (buffer-to *buffers*)
@@ -116,6 +178,89 @@
 		     (not (equalp buffer-to buffer-from)))
 	    (eval (create-production-from-template buffer-from slot-from buffer-to slot-to))))))))
 
+
+(defun get-production-utility (prod)
+  "Retrieves the utility associated with a given production (passed as a symbol)"
+  (caar (no-output (spp-fct `(,prod :utility)))))
+
+(defun create-utility-matrix ()
+  "Creates a matrix of the utilities of transferring the contents between buffers" 
+  (let* ((nb (length *buffers*))
+	 (ns (length *slots*))
+	 (n (* nb ns))
+	 (matrix (make-array `(,n ,n) :initial-element "NA")))
+    (dolist (buffer-from *buffers*)
+      (dolist (slot-from *slots*)
+	(dolist (buffer-to *buffers*)
+	  (dolist (slot-to *slots*)
+	    (when (and (not (equalp buffer-to 'visual))
+		       (not (equalp buffer-from 'manual))
+		       (not (equalp buffer-to buffer-from)))
+	      (let ((prod (read-from-string
+			   (create-production-name
+			    buffer-from
+			    slot-from
+			    buffer-to
+			    slot-to)))
+		    (row (+ (* (position buffer-from *buffers*)
+			       ns)
+			    (position slot-from *slots*)))
+		    (col (+ (* (position buffer-to *buffers*)
+			       ns)
+			    (position slot-from *slots*))))
+		(print prod)
+		(setf (aref matrix row col) (production-utility prod))))))))
+    matrix))
+
+(defun save-matrix (matrix &optional (filename "./utilities.csv"))
+  "Saves a matrix to a CSV file"
+  (let* ((dims (array-dimensions matrix))
+	 (nrows (first dims))
+	 (ncols (second dims)))
+    (with-open-file (out filename
+			 :direction :output
+			 :if-exists :overwrite
+			 :if-does-not-exist :create)
+      (dotimes (i nrows)
+	(dotimes (j ncols)
+	  (let ((val (aref matrix i j)))
+	    (when (null val)
+	      (setf val "NA"))
+	    (format out "~3$" val))
+	  (if (< j (1- ncols))
+	      (format out ",")
+	      (format out "~%")))))))
+		
+
+(defun save-utilities-rformat (&optional (filename "utilities-tibble.csv"))
+  "Creates a matrix of the utilities of transferring the contents between buffers" 
+  (with-open-file (out filename :direction :output
+				:if-exists :overwrite
+				:if-does-not-exist :create)
+    (format out "BufferFrom,SlotFrom,BufferTo,SlotTo,Production,Value~%")
+    (dolist (buffer-from *buffers*)
+      (dolist (slot-from *slots*)
+	(dolist (buffer-to *buffers*)
+	  (dolist (slot-to *slots*)
+	    (let ((prod (read-from-string
+			   (create-production-name
+			    buffer-from
+			    slot-from
+			    buffer-to
+			    slot-to))))
+	      (if (and (not (equalp buffer-to 'visual))
+		       (not (equalp buffer-from 'manual))
+		       (not (equalp buffer-to buffer-from)))
+		  (format out "~A,~A,~A,~A,~A,~A~%"
+			  buffer-from slot-from
+			  buffer-to slot-to
+			  prod
+			  (production-utility prod))
+		  (format out "~A,~A,~A,~A,~A,NA~%"
+			  buffer-from slot-from
+			  buffer-to slot-to
+			  prod)))))))))
+  
 ;;; -------------------------------------------------------------- ;;;
 ;;; TEST MODEL: SIMON TASK
 ;;; -------------------------------------------------------------- ;;;
@@ -125,17 +270,19 @@
   (sgp :er t
        :esc t
        :ul t
-       :esc 0.2
+       :egs 0.2
        :do-not-harvest imaginal)
   
   (chunk-type memory kind memory slot1 slot2 slot3)
-  (add-dm (memory) (rule) (circle) (square) (simon)
+  
+  (add-dm (memory) (stimulus) (rule) (circle) (square) (simon)
 	  (rule1 isa memory kind memory slot1 rule slot2 circle slot3 left)
 	  (rule2 isa memory kind memory slot2 rule slot2 square slot3 right)
-	  (congruent1 isa memory kind memory slot1 circle slot2 left slot3 black)
-	  (congruent2 isa memory kind memory slot1 square slot2 right slot3 black)
-	  (incongruent1 isa memory kind memory slot1 circle slot2 right slot3 black)
-	  (incongruent2 isa memory kind memory slot1 square slot2 left slot3 black)
+	  (congruent1 isa memory kind stimulus slot1 circle slot2 left slot3 black)
+	  (congruent2 isa memory kind stimulus slot1 square slot2 right slot3 black)
+	  (incongruent1 isa memory kind stimulus slot1 circle slot2 right slot3 black)
+	  (incongruent2 isa memory kind stimulus slot1 square slot2 left slot3 black)
+
 	  ;; Fillers
 	  (simon-goal isa memory kind memory slot1 simon slot2 rule)
 	  (imaginal-sketchpad isa memory kind memory))
@@ -146,24 +293,29 @@
 (create-productions-from-template)
 (install-device '("motor" "keyboard"))
 
-(defparameter *trial-start* 0)
-
-(defparameter *trial-response* nil)
-
-(defparameter *correct-response* nil)
-
-(defparameter *trial-ended* nil)
-
 (defparameter *responses* '((square . right)
-			    (circle . left)))
+			    (circle . left))
+  "Responses for the Simon task")
 
-(defparameter *max-trial-duration* 10)
+
+(defparameter *trial-start* 0 "The starting time of a trial (in MP-time)")
+
+(defparameter *trial-response* nil "The response given by the model in a trial")
+
+(defparameter *correct-response* nil "The correct response for a trial")
+
+(defparameter *trial-ended* nil "Flag for whether a trial has ended (through response/runout)or not")
+
+(defparameter *max-trial-duration* 10
+  "Maximum duration of a trial before it runs out (with negative feedback")
 
 (defun get-correct-response (chunk)
+  "Returns the correct response given a stimulus encoded as visual chunk"
   (let ((shape (no-output (chunk-slot-value-fct chunk 'slot1))))
     (cdr (assoc shape *responses*))))
 
 (defun process-response (model key)
+  "Processes a model's key press"
   (declare (ignore model))
   (model-output "---> PROCESS RESPOOOOOONSE --->")
   (if (string-equal key "j")
@@ -232,5 +384,9 @@
     ;;; Run the trial
     (run-until-condition 'trial-end-p)
 
-    ;;; REset
+    ;;; REset: Remove remaining events and change buffers
+    (dolist (module '(utility retrieval imaginal manual))
+      (dolist (id (mp-modules-events module))
+	(delete-event id)))
     (reset-buffers)))
+

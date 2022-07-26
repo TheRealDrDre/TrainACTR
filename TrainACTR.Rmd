@@ -1,0 +1,58 @@
+---
+title: "TrainACT-R"
+output:
+  html_document:
+    code_folding: hide
+    theme: yeti
+    toc: yes
+    toc_depth: 3
+    toc_float: yes
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+  word_document:
+    toc: yes
+    toc_depth: '3'
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(dplyr)
+library(broom)
+library(reshape2)
+#library(gglasso)
+library(glmnet)
+
+#library(magrittr)
+## Graphics
+library(ggplot2)
+library(ggthemes)
+library(ggrepel)
+library(ggExtra)
+library(ggsci)
+library(scales)
+library(viridis)
+library(cowplot)
+
+## tables
+library(kableExtra)
+library(xtable)
+
+# Date functions
+library(anytime)
+library(lubridate)
+
+# SlimStampen
+library(SlimStampeRData)
+```
+
+# TrainACT-R
+
+```{r}
+data <- read_csv("utilities-tibble.csv")
+ggplot(data, aes(x=BufferFrom, y=BufferTo, fill=Value)) + 
+  geom_tile() + 
+  scale_fill_viridis() +
+  theme_pander()
+```

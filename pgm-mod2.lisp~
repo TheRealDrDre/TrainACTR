@@ -51,7 +51,7 @@
 (defparameter *buffers* '(visual imaginal goal retrieval manual))
 (defparameter *slots* '(slot1 slot2 slot3))
 (defparameter *template-modify*
-	      "(p ~A ?manual> preparation free processor free execution free ?~A> state free buffer full ?~A> state free buffer full =~A> =~A> ~A =X ==> =~A> ~A =X)"
+	      "(p ~A ?manual> preparation free processor free execution free ?retrieval> state free ?imaginal> state free ?goal> state free ?visual state free ?~A> =~A> =~A> ~A =X ==> =~A> ~A =X)"
 	      )
 
 (defparameter *template-create-manual*
