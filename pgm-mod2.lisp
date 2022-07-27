@@ -63,10 +63,8 @@
   state free 
  ?imaginal> 
   state free 
-  buffer full
  ?goal> 
   state free 
-  buffer full
  ?visual>
   state free 
  =~A>
@@ -114,10 +112,8 @@
   state free 
  ?imaginal> 
   state free 
-  buffer full
  ?goal> 
   state free 
-  buffer full
  ?visual>
   state free 
  =~A> 
@@ -181,7 +177,8 @@
 
 (defun get-production-utility (prod)
   "Retrieves the utility associated with a given production (passed as a symbol)"
-  (caar (no-output (spp-fct `(,prod :utility)))))
+  (caar (no-output (spp-fct `(,prod :u)))))
+
 
 (defun create-utility-matrix ()
   "Creates a matrix of the utilities of transferring the contents between buffers" 
@@ -270,8 +267,13 @@
   (sgp :er t
        :esc t
        :ul t
-       :egs 0.2
-       :do-not-harvest imaginal)
+;;       :ult t
+       :egs 0.5
+       :alpha 0.05
+       :do-not-harvest imaginal
+       :do-not-harvet visual
+;;       :do-not-harvest retrieval
+       )
   
   (chunk-type memory kind memory slot1 slot2 slot3)
   
@@ -284,7 +286,7 @@
 	  (incongruent2 isa memory kind stimulus slot1 square slot2 left slot3 black)
 
 	  ;; Fillers
-	  (simon-goal isa memory kind memory slot1 simon slot2 rule)
+	  (simon-goal isa memory kind stimulus slot1 simon slot2 rule)
 	  (imaginal-sketchpad isa memory kind memory))
   
   )
@@ -304,10 +306,16 @@
 
 (defparameter *correct-response* nil "The correct response for a trial")
 
+(defparameter *trial-type* nil "The trial type (congruent/incongruent)")
+
 (defparameter *trial-ended* nil "Flag for whether a trial has ended (through response/runout)or not")
 
-(defparameter *max-trial-duration* 10
+(defparameter *max-trial-duration* 5
   "Maximum duration of a trial before it runs out (with negative feedback")
+
+(defparameter *trial-accuracies* () "Accuracies")
+
+(defparameter *trial-rts* () "Response times")
 
 (defun get-correct-response (chunk)
   "Returns the correct response given a stimulus encoded as visual chunk"
@@ -317,7 +325,7 @@
 (defun process-response (model key)
   "Processes a model's key press"
   (declare (ignore model))
-  (model-output "---> PROCESS RESPOOOOOONSE --->")
+  (model-output "---> PROCESS RESPOOOOOONSE --->") 
   (if (string-equal key "j")
       (setf *trial-response* 'right)
       (setf *trial-response* 'left))
@@ -328,10 +336,14 @@
   (setf *trial-ended* t))
 
 (defun reward-response ()
+  "Triggers a reward for a behavioral response"
   (if (equal *trial-response*
-	     *correct-response*)
-      (trigger-reward 10)
-      (trigger-reward -5))
+	     *correct-response*) 
+      (if (equal *trial-type* 'incongruent)
+	  (trigger-reward 10)
+	  (trigger-reward 10)
+	  )
+      (trigger-reward -10))
   (schedule-event-relative 0.005 'end-trial))
       
 
@@ -345,27 +357,36 @@
 (defun reset-buffers ()
   "Resets the slots of Goal and Imaginal to initial conditions"
   (mod-buffer-chunk 'imaginal '(slot1 nil slot2 nil slot3 nil))
-  (mod-buffer-chunk 'goal '(slot1 simon slot2 rule slot3 nil)))
+  (mod-buffer-chunk 'goal '(slot1 simon slot2 rule slot3 nil))
+  (clear-buffer 'retrieval))
   
 
 (add-act-r-command "process-response" 'process-response)
+
 (add-act-r-command "trial-end?" 'trial-end-p)
+
 (monitor-act-r-command "output-key" "process-response")
 
 (defun run-trial ()
   "Runs a single trial with a randomly-geneated stimulus"4
   ;;; Generates a stimulus to place in thge visual buffer
-  (let* ((stimulus (pick (list 'congruent1 'congruent2 'incongruent1 'incongruent2)))
-	 (response (get-correct-response stimulus)))
-
-    
+  (let* ((stimulus (pick (list 'congruent1
+			       'congruent2
+			       'incongruent1
+			       'incongruent2)))
+	 (response (get-correct-response stimulus))
+	 (stimtype (if (member stimulus (list 'congruent1 'congruent2))
+		       'congruent
+		       'incongruent)))
+		       
     ;; Set up trial variables
     (setf *trial-start* (mp-time))
     (setf *trial-response* nil)
     (setf *correct-response* response)
+    (setf *trial-type* stimtype)
     (setf *trial-ended* nil)
 
-    (model-output "---> START TRIAL")  ;; Trace Marker
+    (model-output "---> START TRIAL ~A" stimtype)  ;; Trace Marker
 
     ;; Schedule a negatiev reward if no motor response is made by MAX-DURATION.
     ;; This needs to be done right before the trial ends, otherwise no reward
@@ -374,19 +395,85 @@
 				0.01)
 			     'trigger-reward
 			     :module 'utility
-			     :params '(-1000))
+			     :params '(-10))
     ;;; Set up the buffers
     
-    (goal-focus simon-goal)
+    ;;(goal-focus simon-goal)
+    (goal-focus imaginal-sketchpad)
     (set-buffer-chunk 'visual stimulus)
     (set-buffer-chunk 'imaginal 'imaginal-sketchpad)
+    (clear-buffer 'retrieval)
 
     ;;; Run the trial
     (run-until-condition 'trial-end-p)
 
+    ;; Save the trial behavioral data
+    (push (- (mp-time) *trial-start*)
+	  *trial-rts*)
+    (push (if (equal *correct-response* *trial-response*) 1 0)
+	  *trial-accuracies*)
+    
     ;;; REset: Remove remaining events and change buffers
-    (dolist (module '(utility retrieval imaginal manual))
+    (dolist (module '(utility imaginal motor))
       (dolist (id (mp-modules-events module))
 	(delete-event id)))
+    (model-output "---> TRIAL ENDED, ACC = ~A" (first *trial-accuracies*))
     (reset-buffers)))
 
+(defun save-utilities-rformat (&optional (filename "utilities-tibble.csv"))
+  "Saves a tibble of Utility data in long format in a CSV file" 
+  (with-open-file (out filename :direction :output
+				:if-exists :overwrite
+				:if-does-not-exist :create)
+    (format out "BufferFrom,SlotFrom,BufferTo,SlotTo,Production,Value~%")
+    (dolist (buffer-from *buffers*)
+      (dolist (slot-from *slots*)
+	(dolist (buffer-to *buffers*)
+	  (dolist (slot-to *slots*)
+	    (let ((prod (read-from-string
+			   (create-production-name
+			    buffer-from
+			    slot-from
+			    buffer-to
+			    slot-to))))
+	      (if (and (not (equalp buffer-to 'visual))
+		       (not (equalp buffer-from 'manual))
+		       (not (equalp buffer-to buffer-from)))
+		  (format out "~A,~A,~A,~A,~A,~A~%"
+			  buffer-from slot-from
+			  buffer-to slot-to
+			  prod
+			  (production-utility prod))
+		  (format out "~A,~A,~A,~A,~A,NA~%"
+			  buffer-from slot-from
+			  buffer-to slot-to
+			  prod)))))))))
+
+
+(defun save-behavioral-data-rformat (&optional (filename "behavioral-data.csv"))
+  "Saves a tibble of behavioral data in CSV format"
+  (with-open-file (out filename :direction :output
+				:if-exists :overwrite
+				:if-does-not-exist :create)
+    (format out "Trial,Accuracy,RT~%")
+    (let ((index 0)
+	  (pairs (pairlis *trial-accuracies* *trial-rts*)))
+      (dolist (pair pairs)
+	(format out "~A,~A,~A~%"
+		index
+		(car pair)
+		(cdr pair))
+	(incf index)))))
+
+(defun reset ()
+  (setf *trial-accuracies* nil)
+  (setf *trial-rts* nil)
+  (delete-model)
+  (load "pgm-mod2.lisp"))
+
+(defun run-trials (n &optional (reset t))
+  (when reset
+    (reset))
+  (dotimes (i n)
+    (run-trial)))
+      

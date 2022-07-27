@@ -49,10 +49,86 @@ library(SlimStampeRData)
 
 # TrainACT-R
 
-```{r}
-data <- read_csv("utilities-tibble.csv")
-ggplot(data, aes(x=BufferFrom, y=BufferTo, fill=Value)) + 
-  geom_tile() + 
-  scale_fill_viridis() +
+## Behavioral data
+
+```{r fig.width=5, fig.height=5}
+behav <- read_csv("save2/behavioral-data.csv", col_types = cols(Trial = col_double(),
+                                                         Accuracy = col_double(),
+                                                         RT = col_double())
+                 )
+
+
+behav <- behav %>%
+  mutate(Accuracy = 1.25 * Accuracy) %>%
+  mutate(Block = 1 + 200*floor(Trial / 200))
+  
+
+ggplot(behav, aes(x=Block, y=Accuracy)) +
+  stat_summary(geom="point", fun.data = "mean_sdl", size=3) +
+  stat_summary(geom="ribbon", fun.data = "mean_se", 
+               col=NA,
+               alpha=0.25) +
+  xlab("Trial") +
+  ggtitle("Accuracy over time") +
+  coord_cartesian(ylim=c(0, 1)) +
+  theme_pander()  
+
+
+ggplot(behav, aes(x=Block, y=RT)) +
+  stat_summary(geom="point", fun.data = "mean_sdl", size=3) +
+  stat_summary(geom="ribbon", fun.data = "mean_se", 
+               col=NA,
+               alpha=0.25) +
+  ylim(0, 10) +
   theme_pander()
+```
+
+
+## Production data
+```{r}
+data <- read_csv("utility-data.csv",
+                 col_types = cols(BufferFrom = col_character(),
+                                 SlotFrom = col_character(),
+                                 BufferTo = col_character(),
+                                 SlotTo = col_character(),
+                                 Production = col_character(),
+                                 Value = col_double()))
+
+data <- data %>%
+  mutate(From = str_to_title(paste(BufferFrom, SlotFrom)),
+         To = str_to_title(paste(BufferTo, SlotTo)))
+
+ggplot(data, aes(x=To, y=From, fill=Value)) + 
+  geom_tile(col="white") + 
+  #scale_fill_viridis() +
+  labs(fill=expression(italic(U)[italic(p)])) +
+  coord_equal() +
+  scale_fill_viridis(option = "inferno") +
+  theme_pander() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+
+And now averaged over buffers
+
+```{r, fig.width=4, fig.height=4}
+
+datasimple <- data %>%
+  group_by(BufferFrom, BufferTo) %>%
+  summarize(Value = max(Value, na.rm=T)) %>%
+  mutate(BufferFrom = str_to_title(BufferFrom)) %>%
+  mutate(BufferTo = str_to_title(BufferTo)) 
+
+datasimple$BufferFrom <- factor(datasimple$BufferFrom, levels=c("Visual", "Goal", "Retrieval", "Imaginal", "Manual"))
+datasimple$BufferTo <- factor(datasimple$BufferTo, levels=c("Visual", "Goal", "Retrieval", "Imaginal", "Manual"))
+
+ggplot(datasimple, aes(x=BufferFrom, y=BufferTo, fill=Value)) + 
+  geom_tile(col="white") + 
+  scale_fill_viridis(option = "inferno") +
+  theme_pander() +
+  labs(fill=expression(italic(U)[italic(p)])) +
+  coord_equal() +
+  scale_y_discrete(limits=rev) +
+  xlab("From") +
+  ylab("To") +
+  theme(axis.text.x = element_text(angle = 45, vjust = 0.5, hjust=0.5))
 ```
